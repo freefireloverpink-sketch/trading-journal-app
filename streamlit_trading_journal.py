@@ -6,7 +6,6 @@ import datetime
 
 DB_FILE = 'trading_journal.db'
 
-# --- Initialize or connect to the database ---
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -18,18 +17,19 @@ def init_db():
             qty INTEGER,
             price REAL,
             direction TEXT,
-            pnl REAL
+            pnl REAL,
+            notes TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
-def add_trade(date, symbol, qty, price, direction, pnl):
+def add_trade(date, symbol, qty, price, direction, pnl, notes):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute(
-        "INSERT INTO trades (date, symbol, qty, price, direction, pnl) VALUES (?, ?, ?, ?, ?, ?);",
-        (date, symbol, qty, price, direction, pnl)
+        "INSERT INTO trades (date, symbol, qty, price, direction, pnl, notes) VALUES (?, ?, ?, ?, ?, ?, ?);",
+        (date, symbol, qty, price, direction, pnl, notes)
     )
     conn.commit()
     conn.close()
@@ -42,42 +42,64 @@ def load_trades():
 
 init_db()
 
-st.title("Trading Journal")
+st.set_page_config(page_title='Trading Journal', layout='wide')
+st.title("Advanced Trading Journal 📈")
 
-# --- Trade Input Form ---
+# Trade Input
 with st.form("Add Trade", clear_on_submit=True):
-    st.header("Add New Trade")
+    st.subheader("Add New Trade")
     date = st.date_input("Date", value=datetime.date.today())
-    symbol = st.text_input("Symbol (e.g. AAPL)")
+    symbol = st.text_input("Symbol")
     qty = st.number_input("Quantity", min_value=1, value=100)
     price = st.number_input("Price", min_value=0.0, format="%.2f")
     direction = st.selectbox("Direction", ["Buy", "Sell"])
     pnl = st.number_input("Profit/Loss", format="%.2f")
-    submitted = st.form_submit_button("Add Trade")
+    notes = st.text_area("Trade Notes")
+    submitted = st.form_submit_button("Add")
     if submitted:
-        add_trade(str(date), symbol, int(qty), float(price), direction, float(pnl))
-        st.success("Trade Added!")
+        add_trade(str(date), symbol, int(qty), float(price), direction, float(pnl), notes)
+        st.success("Trade added!")
 
-# --- Show Trades Table ---
-trades_df = load_trades()
-if not trades_df.empty:
-    st.header("All Trades")
-    st.dataframe(trades_df)
+# Display Table & Stats
+df = load_trades()
+tab1, tab2, tab3 = st.tabs(["Trades", "Stats", "Equity Curve"])
 
-    # --- Equity Curve Plot ---
-    st.header("Equity Curve")
-    trades_df['date'] = pd.to_datetime(trades_df['date'], errors='coerce', dayfirst=True)
-    trades_df.sort_values('date', inplace=True)
-    trades_df['CumulativeEquity'] = trades_df['pnl'].cumsum()
-    daily_equity = trades_df.groupby('date')['CumulativeEquity'].last().reset_index()
+with tab1:
+    st.subheader("Your Trades")
+    if not df.empty:
+        st.dataframe(df)
+    else:
+        st.info("No trades yet.")
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(daily_equity['date'], daily_equity['CumulativeEquity'], marker='o')
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Cumulative Equity")
-    ax.set_title("Equity Curve")
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
-else:
-    st.info("No trades yet. Add a trade to begin!")
+with tab2:
+    st.subheader("Trade Statistics")
+    if not df.empty:
+        win_trades = df[df['pnl'] > 0]
+        loss_trades = df[df['pnl'] < 0]
+        st.metric("Total Trades", len(df))
+        st.metric("Win Rate (%)", round(100 * len(win_trades) / len(df), 2) if len(df) > 0 else 0)
+        st.metric("Average Win", round(win_trades['pnl'].mean(), 2) if not win_trades.empty else 0)
+        st.metric("Average Loss", round(loss_trades['pnl'].mean(), 2) if not loss_trades.empty else 0)
+        st.metric("Profit Factor", round(win_trades['pnl'].sum() / abs(loss_trades['pnl'].sum()), 2) if not loss_trades.empty else "N/A")
+    else:
+        st.info("Stats will show after you log trades.")
+
+with tab3:
+    st.subheader("Equity Curve")
+    if not df.empty:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce', dayfirst=True)
+        df = df.sort_values('date')
+        df['CumulativeEquity'] = df['pnl'].cumsum()
+        eq_curve = df.groupby('date')['CumulativeEquity'].last().reset_index()
+        fig, ax = plt.subplots(figsize=(9,4))
+        ax.plot(eq_curve['date'], eq_curve['CumulativeEquity'], marker='o', linewidth=2)
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Cumulative Equity")
+        ax.set_title("Equity Curve")
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+    else:
+        st.info("Add trades for the equity curve.")
+
+st.caption("Built with Streamlit. For more advanced features and dashboards, check out open-source trading journal projects on GitHub.[web:2]")
 
